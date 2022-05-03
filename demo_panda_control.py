@@ -14,9 +14,12 @@ from robot_model import Model
 import roboticstoolbox as rtb
 
 from network_interfaces.zmq import network
+import robot_model
 
 
 def main(state_uri, command_uri):
+    panda_model = robot_model.Model("panda", "panda-model/panda_arm.urdf")
+
     context = zmq.Context(1)
     subscriber = network.configure_subscriber(context, state_uri, False)
     publisher = network.configure_publisher(context, command_uri, False)
@@ -84,6 +87,10 @@ def main(state_uri, command_uri):
     ctrl.set_parameter(sr.Parameter("damping", 10, sr.StateType.PARAMETER_DOUBLE))
     timeZero = time.time()
 
+    prev_command = 0.0
+    friction = 0.0
+    alpha = 0.02
+
     for n in range(nIter):
         state = network.receive_state(subscriber)
         if state:
@@ -97,13 +104,30 @@ def main(state_uri, command_uri):
             desired_state.set_velocities(trajectory.qd.T[:, n])
             desired_state.set_accelerations(trajectory.qdd.T[:, n])
 
-            commanded_torque = ctrl.compute_command(desired_state, feedback_state)
+            # commanded_torque = ctrl.compute_command(desired_state, feedback_state)
+            # torque = commanded_torque.get_torques()
+            cartesianError = (state.ee_state.get_position() - np.array([0.466, -0.1, 0.17]))
+
+            torque = -5*np.array([0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.2]) * (np.linalg.pinv(state.jacobian.data())@np.concatenate((cartesianError, np.zeros(3))))
+
+            # Computing gravity torque and friction
+            current_joint = sr.JointPositions().Zero(state.joint_state.get_name(), state.joint_state.get_names())
+            current_joint.set_positions(state.joint_state.get_positions())
+            gravity_torque = panda_model.compute_gravity_torques(current_joint)
+
+            new_friction = prev_command - state.joint_state.get_torques() + gravity_torque.get_torques()
+            friction = alpha*new_friction + (1-alpha)*friction
+
+            torque += 0*friction
+            print(np.linalg.norm(cartesianError))
+
+            prev_command = torque
 
             data[0, n] = time.time()- timeZero
             data[1:8, n] = trajectory.q.T[:, n]
             data[8:15, n] = state.joint_state.get_positions()
 
-            command.joint_state.set_torques(commanded_torque.get_torques())
+            command.joint_state.set_torques(torque)
             network.send_command(command, publisher)
         time.sleep(time_period)
 

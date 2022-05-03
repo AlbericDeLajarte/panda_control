@@ -14,9 +14,12 @@ from robot_model import Model
 import roboticstoolbox as rtb
 
 from network_interfaces.zmq import network
+import robot_model
 
 
 def main(state_uri, command_uri):
+    panda_model = robot_model.Model("panda", "panda-model/panda_arm.urdf")
+
     context = zmq.Context(1)
     subscriber = network.configure_subscriber(context, state_uri, False)
     publisher = network.configure_publisher(context, command_uri, False)
@@ -57,7 +60,7 @@ def main(state_uri, command_uri):
         desired_state.set_positions(initPose)
         error = np.abs(np.linalg.norm(state.joint_state.get_positions() - initPose))
 
-        while error > 0.3:
+        while error > 0.5:
             state = network.receive_state(subscriber)
             if state:
 
@@ -77,10 +80,15 @@ def main(state_uri, command_uri):
         # # -------------- torque sinus -------------
         time.sleep(2)
 
-        timeZero = time.time()
+        timeZero = time.time() 
         velocity = state.joint_state.get_velocities()
 
-        while abs(velocity[0]) > 1e-6 or error <= 0.3:
+        # while abs(velocity[0]) > 1e-6 or error <= 0.3:
+        t = 0.0
+        prev_command = 0.0
+        friction = 0.0
+        alpha = 0.02
+        while t < 5:
             state = network.receive_state(subscriber)
             if state:
 
@@ -90,7 +98,23 @@ def main(state_uri, command_uri):
 
                 torque = np.zeros(7)
                 if t > 0.0 and t < tf:
-                    torque[0] = (1 - np.cos(2*np.pi/tf *t))*1.5
+                    torque[0] = (1 - np.cos(2*np.pi/tf *t))*1
+
+                # Computing gravity torque and friction
+                current_joint = sr.JointPositions().Zero(state.joint_state.get_name(), state.joint_state.get_names())
+                current_joint.set_positions(state.joint_state.get_positions())
+                gravity_torque = panda_model.compute_gravity_torques(current_joint)
+
+                new_friction = prev_command - state.joint_state.get_torques() + gravity_torque.get_torques()
+                friction = alpha*new_friction + (1-alpha)*friction
+
+                torque += 0.5*friction
+
+                
+                print(friction)
+
+                
+                prev_command = torque
                 
 
                 data = np.zeros(30)

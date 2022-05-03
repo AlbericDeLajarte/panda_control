@@ -24,6 +24,16 @@ smoothVelocity = savgol_filter(smoothVelocity, window, nPoly)
 smoothTorque = mass*np.gradient(np.deg2rad(smoothVelocity), time) 
 smoothTorque = savgol_filter(smoothTorque, window, nPoly)
 
+# smoothJointTorque = savgol_filter(jointTorque[0, :], window, nPoly)
+
+data = np.loadtxt("data_friction.txt")
+smoothJointTorque = jointTorque[0, :]
+alpha = 0.02
+for i in range(len(smoothJointTorque)-1):
+    smoothJointTorque[i+1] = alpha*smoothJointTorque[i+1] + (1-alpha)*smoothJointTorque[i]
+
+friction = commandTorque[0, :] - smoothJointTorque
+
 
 fig, axs = plt.subplots(2, 1)
 
@@ -35,15 +45,16 @@ axs[0].set(xlabel="Time [s]")
 
 axs[1].plot(time, smoothTorque, label="Accel torque")
 axs[1].plot(time, commandTorque[0, :], label="Command torque")
-axs[1].plot(time, jointTorque[0, :], label="Measured torque")
-axs[1].plot(time, smoothTorque - commandTorque[0, :], label = "friction")
+axs[1].plot(time, data[22, :], label="Measured torque")
+axs[1].plot(time, smoothJointTorque, label="Smoothed measured torque")
+# axs[1].plot(time, friction, label = "Friction")
 axs[1].legend()
 axs[1].set(ylabel="N.m")
 axs[1].set(xlabel="Time [s]")
 
 
 fig = plt.figure()
-plt.scatter(smoothVelocity, smoothTorque - commandTorque[0, :])
+plt.scatter(smoothVelocity, friction, marker="+")
 plt.ylabel("friction torque [N.m]")
 plt.xlabel("speed [°/s]")
 
